@@ -473,6 +473,13 @@ for insn in new_insn[:]:
     vals.append(val)
 
     if dest.type == x86_const.X86_OP_REG:
+        if dest.value.reg not in {
+            x86_const.X86_REG_RAX,
+            x86_const.X86_REG_EAX,
+            x86_const.X86_REG_AX,
+            x86_const.X86_REG_AL
+        }:
+            continue
         dest = insn.reg_name(dest.value.reg)
     else:
         dest = re.match(r'^(.+?),', insn.mnemonic)
@@ -480,7 +487,7 @@ for insn in new_insn[:]:
             continue
         dest = dest.group(1)
 
-    asms = ';'.join(f"{'mov' if not i else 'xor'} {dest},0x{val}"
+    asms = ';'.join(f"{'mov' if not i else 'xor'} {dest},0x{val:x}"
                     for i, val in enumerate(vals))
 
     replace_insn(
