@@ -469,7 +469,7 @@ for insn in new_insn[:]:
     for n in range(random.randint(2, 10)):
         rand = random.randint(0, 1 << (8 * src.size) - 1)
         vals.append(rand)
-        val |= rand
+        val ^= rand
     vals.append(val)
 
     if dest.type == x86_const.X86_OP_REG:
