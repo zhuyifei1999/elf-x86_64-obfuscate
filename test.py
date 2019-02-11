@@ -466,6 +466,10 @@ for insn in new_insn[:]:
 
     vals = []
     val = src.value.imm
+
+    # TODO: Figure out how to convert to unsigned
+    if val < 0:
+        continue
     for n in range(random.randint(2, 10)):
         rand = random.randint(0, 1 << (8 * src.size) - 1)
         vals.append(rand)
@@ -489,6 +493,8 @@ for insn in new_insn[:]:
 
     asms = ';'.join(f"{'mov' if not i else 'xor'} {dest},0x{val:x}"
                     for i, val in enumerate(vals))
+
+    print(asms)
 
     replace_insn(
         [insn],
