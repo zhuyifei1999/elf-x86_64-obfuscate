@@ -1,3 +1,4 @@
+import random
 import re
 import struct
 import sys
@@ -54,6 +55,19 @@ for section in sections:
     for insn in insns:
         insn.section = section
         all_insn[insn.address] = insn
+
+
+def RawInsn(data, addr):
+    backing = object()
+    insn = AttrWrapper(backing)
+    insn.address = addr
+    insn.mnemonic = '.bytes'
+    insn.op_str = ', '.join(map(hex, data))
+    insn.bytes = bytes(data)
+    insn.size = len(data)
+    insn.groups = ()
+    insn.operands = ()
+    return insn
 
 
 def print_insn(insn):
@@ -241,10 +255,12 @@ def alignto(addr, alignment):
 new_insn = list(all_insn.values())
 DEBUG_watch_insn = {
     # all_insn[0x608]
+    # all_insn[0x566]
 }
 
 
 def replace_insn(old, new):
+    old, new = map(list, (old, new))
     for insn in old:
         # please, don't have a label here
         try:
@@ -255,14 +271,14 @@ def replace_insn(old, new):
             return
 
     # don't span multiple sections
-    affected_section = set(insn.section for insn in old)
+    affected_section = {insn.section for insn in old}
     if len(affected_section) > 1:
         return
     affected_section = next(iter(affected_section))
     for insn in new:
         insn.section = affected_section
 
-    off = old[0].address
+    initoff = off = old[0].address
     for insn in new:
         insn.address = off
         off += insn.size
@@ -276,10 +292,10 @@ def replace_insn(old, new):
     newlen = sum(insn.size for insn in new)
     if oldlen != newlen:
         size_fixups.append([
-            old[0].address,
+            initoff,
             sum(insn.size for insn in old),
             sum(insn.size for insn in new),
-            set(new)
+            list(new)
         ])
     while size_fixups:
         startpos, oldlen, newlen, nomove = size_fixups.pop(0)
@@ -359,6 +375,7 @@ def replace_insn(old, new):
             if insn in DEBUG_watch_insn:
                 print(' '.join(map(hex, (startpos, oldlen, newlen))))
                 print(f'{insn.address:x} {calc_diff(insn.address):x}')
+                print('NO:', ', '.join(hex(i.address) for i in nomove))
 
             insn.address += calc_diff(insn.address)
 
@@ -366,6 +383,7 @@ def replace_insn(old, new):
             setattr(binary.get_section(section), attr, val)
 
         for insn in new_insn:
+            labeled = False
             changed = []
 
             for operand in insn.operands:
@@ -373,6 +391,8 @@ def replace_insn(old, new):
                     label = operand.label
                 except AttributeError:
                     continue
+                else:
+                    labeled = True
                 addr = resolve_label(label)
                 if operand.type == x86_const.X86_OP_IMM:
                     oldv = operand.value.imm
@@ -388,8 +408,8 @@ def replace_insn(old, new):
                         changed.append((oldv, newv))
                 else:
                     raise AssertionError
-            # if not changed:
-            if not changed and not insn_is_jmping(insn):
+
+            if not changed and (not insn_is_jmping(insn) or not labeled):
                 continue
 
             old_op_str = insn.op_str
@@ -435,15 +455,84 @@ def replace_insn(old, new):
                 insn.size = newsize
 
 
-fist_insn = next(filter(lambda insn: insn.mnemonic == 'pop', new_insn))
-replace_insn(
-    [fist_insn],
-    [fist_insn, next(disasm(bytes(ks.asm('nop')[0]), 0))]
-)
+# === BEGIN ACTUAL OBFUSCATION LOGIC ===
+# XOR-ing movs from imm
+for insn in new_insn[:]:
+    if insn.mnemonic != 'mov' or len(insn.operands) != 2:
+        continue
+    dest, src = insn.operands
+    if src.type != x86_const.X86_OP_IMM:
+        continue
+
+    vals = []
+    val = src.value.imm
+    for n in range(random.randint(2, 10)):
+        rand = random.randint(0, 1 << (8 * src.size) - 1)
+        vals.append(rand)
+        val |= rand
+    vals.append(val)
+
+    if dest.type == x86_const.X86_OP_REG:
+        dest = insn.reg_name(dest.value.reg)
+    else:
+        dest = re.match(r'^(.+?),', insn.mnemonic)
+        if not dest:
+            continue
+        dest = dest.group(1)
+
+    asms = ';'.join(f"{'mov' if not i else 'xor'} {dest},0x{val}"
+                    for i, val in enumerate(vals))
+
+    replace_insn(
+        [insn],
+        disasm(bytes(ks.asm(asms, insn.address)[0]), insn.address)
+    )
+
+# Trash nops, must be last due to not labeled
+for insn in new_insn[:]:
+    if insn.mnemonic == 'nop':
+        continue
+
+    nop = random.choice([
+        b'\x90',
+        b'\x66\x90',
+        b'\x0f\x1f\x00',
+        b'\x0f\x1f\x40\x00',
+        b'\x0f\x1f\x44\x00\x00',
+        b'\x66\x0f\x1f\x44\x00\x00',
+        b'\x0f\x1f\x80\x00\x00\x00\x00',
+        b'\x0f\x1f\x84\x00\x00\x00\x00\x00',
+        b'\x66\x0f\x1f\x84\x00\x00\x00\x00\x00',
+    ])
+
+    replace_insn(
+        [insn],
+        [insn, next(disasm(nop, 0))]
+    )
+
+# Trash bytes
+for insn in new_insn[:]:
+    trash = bytes(random.randint(0, 0xff)
+                  for i in range(random.randint(0, 0xf)))
+    # trash = bytes(0xf4
+    #               for i in range(16))
+
+    jmp = bytes([0xeb, len(trash)])
+
+    replace_insn(
+        [insn],
+        [
+            next(disasm(jmp, insn.address)),
+            RawInsn(trash, insn.address+len(jmp)),
+            insn
+        ]
+    )
+# === END ACTUAL OBFUSCATION LOGIC ===
+
 
 for insn in new_insn:
     # IDEBUG
-    continue
+    # continue
     print_insn(insn)
 
 for section in sections:
