@@ -457,6 +457,8 @@ def replace_insn(old, new):
 
 # === BEGIN ACTUAL OBFUSCATION LOGIC ===
 # XOR-ing movs from imm
+# FIXME: XOR affect flags but mov doesn't
+# TODO: analyze if flags are needed
 for insn in new_insn[:]:
     if insn.mnemonic != 'mov' or len(insn.operands) != 2:
         continue
@@ -486,6 +488,7 @@ for insn in new_insn[:]:
             continue
         dest = insn.reg_name(dest.value.reg)
     else:
+        # TODO: make sure it's not IP
         dest = re.match(r'^(.+?),', insn.mnemonic)
         if not dest:
             continue
@@ -494,14 +497,14 @@ for insn in new_insn[:]:
     asms = ';'.join(f"{'mov' if not i else 'xor'} {dest},0x{val:x}"
                     for i, val in enumerate(vals))
 
-    print(asms)
+    # print(asms)
 
     replace_insn(
         [insn],
         disasm(bytes(ks.asm(asms, insn.address)[0]), insn.address)
     )
 
-# Trash nops, must be last due to not labeled
+# Trash nops
 for insn in new_insn[:]:
     if insn.mnemonic == 'nop':
         continue
@@ -523,7 +526,7 @@ for insn in new_insn[:]:
         [insn, next(disasm(nop, 0))]
     )
 
-# Trash bytes
+# Trash bytes, must be last due to not labeled
 for insn in new_insn[:]:
     trash = bytes(random.randint(0, 0xff)
                   for i in range(random.randint(0, 0xf)))
