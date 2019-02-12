@@ -527,9 +527,10 @@ for insn in new_insn[:]:
     )
 
 # Trash bytes, must be last due to not labeled
+# TODO: use labels
 for insn in new_insn[:]:
     trash = bytes(random.randint(0, 0xff)
-                  for i in range(random.randint(0, 0xf)))
+                  for i in range(random.randint(0, 0x7f)))
     # trash = bytes(0xf4
     #               for i in range(16))
 
@@ -565,12 +566,6 @@ for section in sections:
           f'{section.file_offset:x} {section.offset:x}')
 
 
-# perform segment fixes
-def apply_segment(segment, assert_type, sections):
-    sections = list(sections)
-    assert segment.type == assert_type
-
-
 phdr_seg = next(filter(
     lambda seg: seg.type == lief.ELF.SEGMENT_TYPES.PHDR, binary.segments))
 phdr_load_seg = next(filter(
@@ -597,10 +592,6 @@ for segment in {seg for sec, seg in sections_segments}:
 for addr, label in list(addr_fixups.items()):
     addr_fixups[addr] = resolve_label(label)
     print(f'Addr Fixup: {addr:x} => {addr_fixups[addr]:x}')
-
-
-# binary.write('test_edit')
-# binary = lief.parse('test_edit')
 
 
 for reloc in binary.relocations:
